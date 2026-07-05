@@ -435,6 +435,20 @@ def task_actress_spotlight(demo: bool = False):
 # ─────────────────────────────────────────
 # タスク: 投稿実行
 # ─────────────────────────────────────────
+def _is_post_hour_allowed(hour: int) -> bool:
+    """
+    現在時刻が投稿許可時間帯かどうかを判定する。
+    post_hours（通常投稿時刻）または dense_window（高頻度時間帯）に含まれればTrue。
+    22:00〜9:00のような除外時間帯はどちらにも含めないことで実現する。
+    """
+    if hour in POST_SCHEDULE["post_hours"]:
+        return True
+    dense = POST_SCHEDULE.get("dense_window")
+    if dense and dense["start_hour"] <= hour < dense["end_hour"]:
+        return True
+    return False
+
+
 def _select_media(product: dict, conn) -> tuple:
     """
     商品に応じてメディアを選択する。
@@ -483,7 +497,7 @@ def task_post(force: bool = False, poster_fn=None):
         # 時間帯チェック
         now  = datetime.now()
         hour = now.hour
-        if hour not in POST_SCHEDULE["post_hours"]:
+        if not _is_post_hour_allowed(hour):
             conn.close()
             return None
 
@@ -596,7 +610,7 @@ def task_draft(force: bool = False):
     if not force:
         now  = datetime.now()
         hour = now.hour
-        if hour not in POST_SCHEDULE["post_hours"]:
+        if not _is_post_hour_allowed(hour):
             conn.close()
             return None
 
@@ -876,13 +890,24 @@ def run_scheduler(demo: bool = False):
     # 月曜の朝に女優スポットライト生成
     schedule.every().monday.at("06:00").do(task_actress_spotlight, demo=demo)
 
-    # 投稿時間帯ごとに実行（ゆらぎ付き）
+    # 通常投稿時刻ごとに実行（ゆらぎ付き）
     # POST_SCHEDULE["mode"] に応じて draft / auto / selenium を自動的に切り替える
     for hour in POST_SCHEDULE["post_hours"]:
         jitter = random.randint(0, POST_SCHEDULE["time_jitter_minutes"])
         sched_time = f"{hour:02d}:{jitter:02d}"
         schedule.every().day.at(sched_time).do(_dispatch_post)
         log.info("  投稿スケジュール: %s (%s)", sched_time, POST_SCHEDULE.get("mode"))
+
+    # 高頻度時間帯（例: 18:00〜22:00は30分おき）
+    dense = POST_SCHEDULE.get("dense_window")
+    if dense:
+        t, end_t = dense["start_hour"] * 60, dense["end_hour"] * 60
+        while t < end_t:
+            hh, mm = divmod(t, 60)
+            sched_time = f"{hh:02d}:{mm:02d}"
+            schedule.every().day.at(sched_time).do(_dispatch_post)
+            log.info("  投稿スケジュール(高頻度): %s (%s)", sched_time, POST_SCHEDULE.get("mode"))
+            t += dense["interval_minutes"]
 
     # 深夜3時にエンゲージメント収集（draftモードでは X API read も課金対象のため無効化）
     if POST_SCHEDULE.get("mode") != "draft":

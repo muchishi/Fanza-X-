@@ -124,15 +124,15 @@ POST_SCHEDULE = {
     "mode": "draft",
 
     # 1日の最大投稿数（凍結リスク管理）
-    "daily_max": 8,
+    "daily_max": 12,
 
-    # 投稿時間帯（24時間表記）— エンゲージメント高い時間帯
-    "post_hours": [7, 12, 19, 21, 22, 23],
+    # 通常投稿時刻（24時間表記）。22:00〜9:00は除外時間帯のため指定しない
+    "post_hours": [12],
 
-    # 最小投稿間隔（分）
-    "min_interval_minutes": 70,
+    # 高頻度時間帯: この時間はinterval_minutesおきに投稿する
+    "dense_window": {"start_hour": 18, "end_hour": 22, "interval_minutes": 30},
 
-    # 投稿時刻のランダムゆらぎ（分）— スパム判定回避
+    # 投稿時刻のランダムゆらぎ（分）— スパム判定回避（通常投稿時刻のみに適用）
     "time_jitter_minutes": 12,
 }
 
