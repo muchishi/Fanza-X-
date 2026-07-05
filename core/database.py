@@ -86,6 +86,7 @@ def init_db() -> None:
         priority     INTEGER DEFAULT 5,
         scheduled_at TEXT,
         status       TEXT DEFAULT 'pending',
+        draft_path   TEXT,
         created_at   TEXT DEFAULT (datetime('now','localtime')),
         posted_at    TEXT
     );
@@ -205,6 +206,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE products ADD COLUMN sample_image_urls TEXT",
         "ALTER TABLE post_log ADD COLUMN video_path       TEXT",
         "ALTER TABLE post_log ADD COLUMN reply_tweet_id   TEXT",
+        "ALTER TABLE post_queue ADD COLUMN draft_path      TEXT",
     ]
     for sql in migrations:
         try:
@@ -338,6 +340,26 @@ def dequeue_next(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
         ORDER BY priority ASC, created_at ASC
         LIMIT 1
     """).fetchone()
+
+
+def mark_draft(conn: sqlite3.Connection, queue_id: int, draft_path: str) -> None:
+    """
+    半自動投稿モード: X APIを呼ばずローカルに下書きを出力した際、
+    post_queueのステータスを'draft'にして二重生成を防ぐ。
+    実際にユーザーが手動投稿した後は confirm_posted() で 'posted' に遷移させる。
+    """
+    conn.execute(
+        "UPDATE post_queue SET status='draft', draft_path=? WHERE id=?",
+        (draft_path, queue_id)
+    )
+    conn.commit()
+
+
+def get_draft_queue_item(conn: sqlite3.Connection, queue_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM post_queue WHERE id=? AND status='draft'",
+        (queue_id,)
+    ).fetchone()
 
 
 def mark_posted(
