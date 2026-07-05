@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+# 実際の認証情報（FANZA API / X API / Gemini API）
+.env
+
+# ローカルDB・動画/画像ライブラリ・ログ（実行時に自動生成される）
+data/
+logs/
+
+# Claude Codeのローカル設定
+.claude/settings.local.json
