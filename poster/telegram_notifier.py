@@ -255,23 +255,22 @@ def notify_draft_thread(
 ) -> bool:
     """
     画像系の下書きを3投稿スレッドとして案内する。
-    送られてくるテキストはそのままコピペ投稿できる想定なので、
-    案内ラベルは付けず、各パートの投稿文だけを送る:
-      1投稿目: part1_text（先頭に(1/3)を含む） + 画像1枚
-      2投稿目: 残りの画像のみ + part2_caption（(2/3)など）
-      3投稿目: part3_text（先頭に(3/3)を含む）
+    X側の投稿は3分割(1投稿目:本文+画像1枚 / 2投稿目:残り画像 / 3投稿目:リンク)のままだが、
+    Telegramでの画像確認・保存をしやすくするため、画像は4枚まとめて1回で送る。
+    どれが1投稿目用の画像かは、後続の part2_caption（(2/3)など）のテキストで判別する。
     """
     if not _enabled():
         log.debug("[Telegram] 未設定のため通知スキップ")
         return False
 
-    if part1_image:
-        ok = send_photo(part1_image, caption=part1_text)
+    all_images = ([part1_image] if part1_image else []) + list(part2_images)
+    if all_images:
+        ok = _send_photos_any(all_images, caption=part1_text)
     else:
         ok = send_message(part1_text)
 
-    if part2_images:
-        _send_photos_any(part2_images, caption=part2_caption)
+    if part2_caption:
+        send_message(part2_caption)
 
     if part3_text:
         send_message(part3_text)
