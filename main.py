@@ -634,17 +634,24 @@ def task_draft(force: bool = False):
     ]
     (draft_dir / "meta.txt").write_text(chr(10).join(meta_lines) + chr(10), encoding="utf-8")
 
+    saved_video_path = None
+    saved_image_paths = []
+
     if video_path:
         try:
-            shutil.copy(video_path, draft_dir / f"video{Path(video_path).suffix}")
+            saved_video_path = draft_dir / f"video{Path(video_path).suffix}"
+            shutil.copy(video_path, saved_video_path)
         except Exception as e:
             log.warning("[下書き] 動画コピー失敗: %s", e)
+            saved_video_path = None
     else:
         for i, url in enumerate(image_urls[:4], start=1):
             img_bytes = download_image(url)
             if img_bytes:
                 ext = Path(url).suffix or ".jpg"
-                (draft_dir / f"image_{i:02d}{ext}").write_bytes(img_bytes)
+                img_path = draft_dir / f"image_{i:02d}{ext}"
+                img_path.write_bytes(img_bytes)
+                saved_image_paths.append(img_path)
             else:
                 log.warning("[下書き] 画像ダウンロード失敗: %s", url)
 
@@ -653,6 +660,16 @@ def task_draft(force: bool = False):
 
     log.info("[下書き作成完了] queue_id=%d → %s", item_data["id"], draft_dir)
     print(f"下書き作成完了: {draft_dir}")
+
+    from poster.telegram_notifier import notify_draft
+    notify_draft(
+        main_body   = item_data["body"],
+        reply_body  = item_data.get("reply_body", ""),
+        queue_id    = item_data["id"],
+        video_path  = saved_video_path,
+        image_paths = saved_image_paths,
+    )
+
     return str(draft_dir)
 
 
