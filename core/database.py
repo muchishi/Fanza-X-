@@ -191,6 +191,12 @@ def init_db() -> None:
     );
     CREATE INDEX IF NOT EXISTS idx_videos_genre  ON videos(genre_key, active);
     CREATE INDEX IF NOT EXISTS idx_videos_active ON videos(active, used_count);
+
+    -- 汎用キーバリューストア（Telegramのlast_update_idなど、単純な状態保存用）
+    CREATE TABLE IF NOT EXISTS kv_store (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+    );
     """)
     conn.commit()
     _migrate(conn)
@@ -610,6 +616,22 @@ def list_videos_db(conn: sqlite3.Connection) -> list[dict]:
         ORDER BY genre_key, used_count DESC
     """).fetchall()
     return [dict(r) for r in rows]
+
+
+# ────────────────────────────────────────────
+# 汎用キーバリューストア
+# ────────────────────────────────────────────
+def get_kv(conn: sqlite3.Connection, key: str, default: Optional[str] = None) -> Optional[str]:
+    row = conn.execute("SELECT value FROM kv_store WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_kv(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute("""
+        INSERT INTO kv_store (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    """, (key, value))
+    conn.commit()
 
 
 if __name__ == "__main__":

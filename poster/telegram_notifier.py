@@ -4,6 +4,8 @@ poster/telegram_notifier.py — 下書きをTelegramへ通知送信
 X APIを使わない半自動投稿モード(task_draft)用の配信手段。
 下書き作成時に本文・画像/動画・リプライ文をTelegramに送ることで、
 スマホのTelegramアプリからコピー&ペーストでX投稿できるようにする。
+「✅ 投稿完了」ボタンをタップすると自動でconfirm_posted()が実行される
+（main.py --telegram-listen またはスケジューラー実行中のみ）。
 
 セットアップ:
   1. Telegramで @BotFather に /newbot を送信してBotトークンを取得
@@ -53,6 +55,35 @@ def send_message(text: str) -> bool:
         return False
 
 
+def send_message_with_confirm_button(text: str, queue_id: int) -> bool:
+    """「✅ 投稿完了」ボタン付きメッセージを送る。タップするとcallback_queryが飛ぶ"""
+    if not _enabled():
+        return False
+    url = API_BASE.format(token=TELEGRAM["bot_token"]) + "/sendMessage"
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "✅ 投稿完了", "callback_data": "confirm:{}".format(queue_id)}
+        ]]
+    }
+    try:
+        resp = requests.post(
+            url,
+            data={
+                "chat_id": TELEGRAM["chat_id"],
+                "text": text,
+                "reply_markup": json.dumps(reply_markup),
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            log.warning("[Telegram] sendMessage(button)失敗: %d %s", resp.status_code, resp.text[:200])
+            return False
+        return True
+    except Exception as e:
+        log.warning("[Telegram] sendMessage(button)例外: %s", e)
+        return False
+
+
 def send_video(video_path, caption: str) -> bool:
     if not _enabled():
         return False
@@ -84,8 +115,8 @@ def send_photo_group(image_paths: list, caption: str) -> bool:
     opened = []
     try:
         for i, path in enumerate(image_paths[:10]):
-            key = f"photo{i}"
-            item = {"type": "photo", "media": f"attach://{key}"}
+            key = "photo{}".format(i)
+            item = {"type": "photo", "media": "attach://{}".format(key)}
             if i == 0:
                 item["caption"] = caption
             media.append(item)
@@ -111,6 +142,39 @@ def send_photo_group(image_paths: list, caption: str) -> bool:
             fh.close()
 
 
+def get_updates(offset: Optional[int] = None, timeout: int = 5) -> list:
+    """long-polling で新着メッセージ/コールバックを取得する"""
+    if not _enabled():
+        return []
+    url = API_BASE.format(token=TELEGRAM["bot_token"]) + "/getUpdates"
+    params = {"timeout": timeout}
+    if offset is not None:
+        params["offset"] = offset
+    try:
+        resp = requests.get(url, params=params, timeout=timeout + 10)
+        if resp.status_code != 200:
+            log.warning("[Telegram] getUpdates失敗: %d %s", resp.status_code, resp.text[:200])
+            return []
+        return resp.json().get("result", [])
+    except Exception as e:
+        log.warning("[Telegram] getUpdates例外: %s", e)
+        return []
+
+
+def answer_callback_query(callback_query_id: str, text: str = "") -> None:
+    if not _enabled():
+        return
+    url = API_BASE.format(token=TELEGRAM["bot_token"]) + "/answerCallbackQuery"
+    try:
+        requests.post(
+            url,
+            data={"callback_query_id": callback_query_id, "text": text},
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning("[Telegram] answerCallbackQuery例外: %s", e)
+
+
 def notify_draft(
     main_body: str,
     reply_body: str,
@@ -120,7 +184,7 @@ def notify_draft(
 ) -> bool:
     """
     下書き1件をTelegramに通知する。
-    メディア付きメッセージ(本文=キャプション) → リプライ文 → 確認コマンド案内、の順で送信。
+    メディア付きメッセージ(本文=キャプション) → リプライ文 → 「投稿完了」ボタン、の順で送信。
     """
     if not _enabled():
         log.debug("[Telegram] 未設定のため通知スキップ")
@@ -134,8 +198,11 @@ def notify_draft(
         ok = send_message(main_body)
 
     if reply_body:
-        send_message(f"【リプライ用】\n{reply_body}")
+        send_message("【リプライ用】\n" + reply_body)
 
-    send_message(f"投稿し終えたら実行:\npython main.py --confirm-posted {queue_id}")
+    send_message_with_confirm_button(
+        "投稿し終えたらボタンを押してください👇\n(または python main.py --confirm-posted {})".format(queue_id),
+        queue_id,
+    )
 
     return ok

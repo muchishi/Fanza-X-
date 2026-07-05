@@ -43,6 +43,7 @@ from core.database import (
     get_sale_products, was_recently_posted,
     update_actress_stats, update_hashtag_stats,
     mark_draft, get_draft_queue_item,
+    get_kv, set_kv,
 )
 from core.fanza_client import FanzaClient
 from core.video_manager import pick_video, initialize as init_videos, show_library
@@ -705,6 +706,55 @@ def confirm_posted(queue_id: int):
     return manual_id
 
 
+def process_telegram_updates():
+    """
+    Telegramの「✅ 投稿完了」ボタン(callback_query)をチェックし、
+    押されていれば confirm_posted() を自動実行する。
+    run_scheduler のループ内、または --telegram-listen から呼ばれる。
+    """
+    from poster.telegram_notifier import get_updates, answer_callback_query, send_message
+
+    conn = get_conn()
+    last_id = int(get_kv(conn, "telegram_last_update_id", "0") or "0")
+
+    updates = get_updates(offset=last_id + 1, timeout=5)
+    for update in updates:
+        last_id = max(last_id, update["update_id"])
+
+        cq = update.get("callback_query")
+        if cq and (cq.get("data") or "").startswith("confirm:"):
+            try:
+                queue_id = int(cq["data"].split(":", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            answer_callback_query(cq["id"], "記録しました")
+            result = confirm_posted(queue_id)
+            if result:
+                send_message(f"✅ queue_id={queue_id} を記録しました")
+
+    if updates:
+        set_kv(conn, "telegram_last_update_id", str(last_id))
+    conn.close()
+
+
+def run_telegram_listener():
+    """
+    Telegramの「投稿完了」ボタンを待ち受け続ける単独プロセス。
+    python main.py --telegram-listen で起動（Ctrl+Cで停止）。
+    """
+    log.info("Telegram「投稿完了」ボタンの待受を開始（Ctrl+Cで停止）")
+    while True:
+        try:
+            process_telegram_updates()
+        except KeyboardInterrupt:
+            log.info("停止シグナル受信。終了します。")
+            break
+        except Exception as e:
+            log.error("[Telegram] リスナーエラー: %s", e)
+            time.sleep(5)
+    return manual_id
+
+
 # ─────────────────────────────────────────
 # タスク: エンゲージメント収集 & 統計更新
 # ─────────────────────────────────────────
@@ -815,6 +865,8 @@ def run_scheduler(demo: bool = False):
             schedule.run_pending()
             # キューが溜まっている場合は追加投稿を試みる
             _try_extra_post()
+            # Telegramの「投稿完了」ボタンをチェック（draftモード運用の記録用）
+            process_telegram_updates()
         except KeyboardInterrupt:
             log.info("停止シグナル受信。終了します。")
             break
@@ -911,6 +963,7 @@ def main():
     parser.add_argument("--confirm-posted", type=int, metavar="QUEUE_ID", help="手動投稿し終えたdraftをpost_logに記録")
     parser.add_argument("--post-selenium", action="store_true", help="キューから1件、Seleniumでブラウザ自動投稿して終了（規約違反・凍結リスクは自己責任）")
     parser.add_argument("--selenium-login", action="store_true", help="Selenium用にXへ手動ログインしてセッションを保存")
+    parser.add_argument("--telegram-listen", action="store_true", help="Telegramの「投稿完了」ボタン待受を開始（Ctrl+Cで停止）")
     parser.add_argument("--metrics",     action="store_true", help="エンゲージメント収集のみ実行")
     parser.add_argument("--sale",        action="store_true", help="セールアラートチェックのみ実行")
     parser.add_argument("--force",       action="store_true", help="時間帯チェックをスキップして投稿")
@@ -958,6 +1011,8 @@ def main():
         from poster.selenium_poster import post_item_selenium
         result = task_post(force=args.force, poster_fn=post_item_selenium)
         print("投稿結果:", result)
+    elif getattr(args, "telegram_listen", False):
+        run_telegram_listener()
     elif args.metrics:
         task_collect_metrics()
     elif args.sale:
