@@ -486,7 +486,10 @@ def task_post(force: bool = False):
             log.warning("[動画] 動画なし。data/videos/ に MP4 を配置してください。動画なしで投稿します。")
     else:
         sample_str = product.get("sample_image_urls") or ""
-        image_urls = [u for u in sample_str.split(",") if u][:4]
+        samples = [u for u in sample_str.split(",") if u]
+        # 1枚目は表紙であることが多いため除外し、残りからランダムに最大4枚選ぶ
+        candidates = samples[1:] if len(samples) > 1 else samples
+        image_urls = random.sample(candidates, min(4, len(candidates))) if candidates else []
         if not image_urls and product.get("thumbnail_url"):
             image_urls = [product["thumbnail_url"]]
 
