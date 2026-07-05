@@ -26,6 +26,7 @@ main.py — FANZA × Gemini × X 自動投稿システム メインスケジュ�
   - ハッシュタグ最適化: 実績データで自動最適化
 """
 import sys
+import re
 import time
 import shutil
 import logging
@@ -621,16 +622,34 @@ def task_draft(force: bool = False):
 
     video_path, image_urls = _select_media(product, conn)
 
+    # 画像投稿（同人誌など）は3投稿スレッド構成にする:
+    #   1投稿目: 本文の先頭に(1/3)を付けて画像1枚のみ
+    #   2投稿目: 残りの画像のみ（リプライ）
+    #   3投稿目: アフィリエイトリンク（リプライ）
+    # 動画作品（サンプル動画あり）は従来通り2投稿構成のまま。
+    is_image_post = not video_path
+    if is_image_post:
+        hashtags = " ".join(re.findall(r"#\S+", item_data["body"]))
+        title_short = (product.get("title") or "").strip()[:40] or "新着同人誌"
+        main_text = "(1/3) " + title_short + (chr(10) + hashtags if hashtags else "")
+        part2_caption = "(2/3)"
+        reply_text = "(3/3)" + chr(10) + item_data.get("reply_body", "")
+    else:
+        main_text = item_data["body"]
+        part2_caption = ""
+        reply_text = item_data.get("reply_body", "")
+
     draft_dir = DRAFTS_DIR / f"{item_data['id']}_{item_data.get('product_id', 'unknown')}"
     draft_dir.mkdir(parents=True, exist_ok=True)
 
-    (draft_dir / "main.txt").write_text(item_data["body"], encoding="utf-8")
-    (draft_dir / "reply.txt").write_text(item_data.get("reply_body", ""), encoding="utf-8")
+    (draft_dir / "main.txt").write_text(main_text, encoding="utf-8")
+    (draft_dir / "reply.txt").write_text(reply_text, encoding="utf-8")
     meta_lines = [
         f"queue_id: {item_data['id']}",
         f"post_type: {item_data['post_type']}",
         f"product_id: {item_data.get('product_id', '')}",
         f"title: {product.get('title', '')}",
+        "構成: 3投稿スレッド（1:本文+画像1枚 / 2:残り画像 / 3:リンク）" if is_image_post else "構成: 2投稿（1:動画+本文 / 2:リンク）",
         f"確認後は次を実行: python main.py --confirm-posted {item_data['id']}",
     ]
     (draft_dir / "meta.txt").write_text(chr(10).join(meta_lines) + chr(10), encoding="utf-8")
@@ -662,14 +681,27 @@ def task_draft(force: bool = False):
     log.info("[下書き作成完了] queue_id=%d → %s", item_data["id"], draft_dir)
     print(f"下書き作成完了: {draft_dir}")
 
-    from poster.telegram_notifier import notify_draft
-    notify_draft(
-        main_body   = item_data["body"],
-        reply_body  = item_data.get("reply_body", ""),
-        queue_id    = item_data["id"],
-        video_path  = saved_video_path,
-        image_paths = saved_image_paths,
-    )
+    if video_path:
+        from poster.telegram_notifier import notify_draft
+        notify_draft(
+            main_body   = main_text,
+            reply_body  = reply_text,
+            queue_id    = item_data["id"],
+            video_path  = saved_video_path,
+            image_paths = [],
+        )
+    else:
+        from poster.telegram_notifier import notify_draft_thread
+        part1_image  = saved_image_paths[0] if saved_image_paths else None
+        part2_images = saved_image_paths[1:] if len(saved_image_paths) > 1 else []
+        notify_draft_thread(
+            part1_text    = main_text,
+            part1_image   = part1_image,
+            part2_images  = part2_images,
+            part2_caption = part2_caption,
+            part3_text    = reply_text,
+            queue_id      = item_data["id"],
+        )
 
     return str(draft_dir)
 

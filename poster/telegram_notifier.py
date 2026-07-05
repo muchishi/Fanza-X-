@@ -7,6 +7,12 @@ X APIを使わない半自動投稿モード(task_draft)用の配信手段。
 「✅ 投稿完了」ボタンをタップすると自動でconfirm_posted()が実行される
 （main.py --telegram-listen またはスケジューラー実行中のみ）。
 
+画像系の下書き(同人誌など)は3投稿スレッドとして案内する:
+  1投稿目: 本文（先頭に(1/3)）+ 画像1枚
+  2投稿目: 残りの画像のみ（リプライ）
+  3投稿目: アフィリエイトリンク（リプライ）
+動画系の下書き(FANZA動画作品)は従来通り2投稿（動画+本文 → リプライにリンク）。
+
 セットアップ:
   1. Telegramで @BotFather に /newbot を送信してBotトークンを取得
   2. 作成したBotに任意のメッセージを1通送信する
@@ -105,7 +111,29 @@ def send_video(video_path, caption: str) -> bool:
         return False
 
 
-def send_photo_group(image_paths: list, caption: str) -> bool:
+def send_photo(image_path, caption: str = "") -> bool:
+    if not _enabled():
+        return False
+    url = API_BASE.format(token=TELEGRAM["bot_token"]) + "/sendPhoto"
+    try:
+        with open(image_path, "rb") as f:
+            resp = requests.post(
+                url,
+                data={"chat_id": TELEGRAM["chat_id"], "caption": caption},
+                files={"photo": f},
+                timeout=30,
+            )
+        if resp.status_code != 200:
+            log.warning("[Telegram] sendPhoto失敗: %d %s", resp.status_code, resp.text[:200])
+            return False
+        return True
+    except Exception as e:
+        log.warning("[Telegram] sendPhoto例外: %s", e)
+        return False
+
+
+def send_photo_group(image_paths: list, caption: str = "") -> bool:
+    """2枚以上の画像をまとめて送る（TelegramのsendMediaGroup仕様上、1枚では使えない）"""
     if not _enabled() or not image_paths:
         return False
 
@@ -117,7 +145,7 @@ def send_photo_group(image_paths: list, caption: str) -> bool:
         for i, path in enumerate(image_paths[:10]):
             key = "photo{}".format(i)
             item = {"type": "photo", "media": "attach://{}".format(key)}
-            if i == 0:
+            if i == 0 and caption:
                 item["caption"] = caption
             media.append(item)
             fh = open(path, "rb")
@@ -140,6 +168,15 @@ def send_photo_group(image_paths: list, caption: str) -> bool:
     finally:
         for fh in opened:
             fh.close()
+
+
+def _send_photos_any(image_paths: list, caption: str = "") -> bool:
+    """画像1枚ならsendPhoto、2枚以上ならsendMediaGroupを使う"""
+    if not image_paths:
+        return False
+    if len(image_paths) == 1:
+        return send_photo(image_paths[0], caption=caption)
+    return send_photo_group(image_paths, caption=caption)
 
 
 def get_updates(offset: Optional[int] = None, timeout: int = 5) -> list:
@@ -183,7 +220,7 @@ def notify_draft(
     image_paths: Optional[list] = None,
 ) -> bool:
     """
-    下書き1件をTelegramに通知する。
+    動画系の下書き1件をTelegramに通知する（従来通りの2投稿構成）。
     メディア付きメッセージ(本文=キャプション) → リプライ文 → 「投稿完了」ボタン、の順で送信。
     """
     if not _enabled():
@@ -193,15 +230,54 @@ def notify_draft(
     if video_path:
         ok = send_video(video_path, caption=main_body)
     elif image_paths:
-        ok = send_photo_group(image_paths, caption=main_body)
+        ok = _send_photos_any(image_paths, caption=main_body)
     else:
         ok = send_message(main_body)
 
     if reply_body:
-        send_message("【リプライ用】\n" + reply_body)
+        send_message("【リプライ用】" + chr(10) + reply_body)
 
     send_message_with_confirm_button(
-        "投稿し終えたらボタンを押してください👇\n(または python main.py --confirm-posted {})".format(queue_id),
+        "投稿し終えたらボタンを押してください👇" + chr(10) + "(または python main.py --confirm-posted {})".format(queue_id),
+        queue_id,
+    )
+
+    return ok
+
+
+def notify_draft_thread(
+    part1_text: str,
+    part1_image,
+    part2_images: list,
+    part3_text: str,
+    queue_id: int,
+    part2_caption: str = "",
+) -> bool:
+    """
+    画像系の下書きを3投稿スレッドとして案内する。
+    送られてくるテキストはそのままコピペ投稿できる想定なので、
+    案内ラベルは付けず、各パートの投稿文だけを送る:
+      1投稿目: part1_text（先頭に(1/3)を含む） + 画像1枚
+      2投稿目: 残りの画像のみ + part2_caption（(2/3)など）
+      3投稿目: part3_text（先頭に(3/3)を含む）
+    """
+    if not _enabled():
+        log.debug("[Telegram] 未設定のため通知スキップ")
+        return False
+
+    if part1_image:
+        ok = send_photo(part1_image, caption=part1_text)
+    else:
+        ok = send_message(part1_text)
+
+    if part2_images:
+        _send_photos_any(part2_images, caption=part2_caption)
+
+    if part3_text:
+        send_message(part3_text)
+
+    send_message_with_confirm_button(
+        "3投稿すべて完了したらボタンを押してください👇" + chr(10) + "(または python main.py --confirm-posted {})".format(queue_id),
         queue_id,
     )
 
