@@ -6,6 +6,7 @@ core/fanza_client.py — FANZA データ取得 & 商品スコアリング
 セール商品は最優先（割引率に比例したボーナス付与）
 """
 import sys
+import re
 import time
 import random
 import logging
@@ -27,6 +28,20 @@ except ImportError:
     HAS_REQUESTS = False
 
 log = logging.getLogger(__name__)
+
+
+def _safe_int_price(value, default: int = 0) -> int:
+    """
+    FANZA APIの価格フィールドをintに変換する。
+    複数オプション商品は "350~" のような範囲表記になることがあるため、
+    先頭の数字部分だけを取り出す。
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, int):
+        return value
+    match = re.match(r"\d+", str(value))
+    return int(match.group()) if match else default
 
 _REQUEST_HEADERS = {
     "User-Agent": (
@@ -175,8 +190,8 @@ class FanzaAPIClient:
             "thumbnail_url":   raw.get("imageURL", {}).get("large") or raw.get("imageURL", {}).get("list", ""),
             "sample_movie_url": "",              # 同人誌にサンプル動画はない
             "sample_image_urls": sample_images,  # サンプル画像（投稿用は先頭を使用）
-            "price":           int(prices.get("price", 0) or 0),
-            "list_price":      int(prices.get("list_price", 0) or prices.get("listprice", 0) or 0),
+            "price":           _safe_int_price(prices.get("price")),
+            "list_price":      _safe_int_price(prices.get("list_price") or prices.get("listprice")),
         }
 
     def _normalize(self, raw: dict) -> dict:
@@ -205,8 +220,8 @@ class FanzaAPIClient:
             "product_url":     raw.get("URL", ""),          # FANZA商品ページURL
             "thumbnail_url":   raw.get("imageURL", {}).get("list", ""),
             "sample_movie_url": sample_movie_url,           # サンプル動画URL
-            "price":           int(prices.get("price", 0) or 0),
-            "list_price":      int(prices.get("listprice", 0) or 0),
+            "price":           _safe_int_price(prices.get("price")),
+            "list_price":      _safe_int_price(prices.get("listprice")),
         }
 
 
