@@ -645,7 +645,7 @@ def task_draft(force: bool = False):
     if is_image_post:
         hashtags = " ".join(re.findall(r"#\S+", item_data["body"]))
         title_short = (product.get("title") or "").strip()[:40] or "新着同人誌"
-        main_text = "(1/3) " + title_short + (chr(10) + hashtags if hashtags else "")
+        main_text = "(1/3)" + chr(10) + title_short + (chr(10) + chr(10) + hashtags if hashtags else "")
         part2_caption = "(2/3)"
         reply_text = "(3/3)" + chr(10) + item_data.get("reply_body", "")
     else:
