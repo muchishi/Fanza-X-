@@ -329,6 +329,16 @@ def enqueue(
     if exists:
         return -1
 
+    # 同じ商品がまだ pending/draft でキューに残っている場合は二重登録しない
+    # （定期的な商品再取得のたびに、未消化のキューへ何度も追加されるのを防ぐ）
+    if product_id:
+        already_queued = conn.execute("""
+            SELECT 1 FROM post_queue
+            WHERE product_id = ? AND status IN ('pending', 'draft')
+        """, (product_id,)).fetchone()
+        if already_queued:
+            return -1
+
     cur = conn.execute("""
         INSERT INTO post_queue
             (post_type, product_id, body, reply_body, variant_id, priority, scheduled_at)
