@@ -297,7 +297,7 @@ class XPoster:
             return None
 
     # ── ツイート投稿（v2）────────────────────
-    def post_tweet(self, text: str, media_id: Optional[str] = None) -> dict:
+    def post_tweet(self, text: str, media_id: Optional[str] = None, media_ids: Optional[list] = None) -> dict:
         if self._dry_run:
             fake_id = f"dry_{int(time.time())}"
             log.info("[DRY-RUN] ツイート: %s...", text[:50])
@@ -306,9 +306,11 @@ class XPoster:
         if not HAS_REQUESTS:
             raise RuntimeError("requests が未インストールです")
 
+        ids = media_ids or ([media_id] if media_id else None)
+
         payload = {"text": text}
-        if media_id:
-            payload["media"] = {"media_ids": [media_id]}
+        if ids:
+            payload["media"] = {"media_ids": ids}
 
         headers = {**self._auth_header("POST", TWEET_V2_URL),
                    "Content-Type": "application/json"}
@@ -412,18 +414,18 @@ def post_item(
     main_body: str,
     reply_body: str,
     video_path: Optional[Path] = None,
-    image_url: Optional[str] = None,
+    image_urls: Optional[list] = None,
     variant_id: str = "A",
     poster: Optional["XPoster"] = None,
 ) -> dict:
     """
     1商品の投稿フロー全体を実行する:
-      1. メディアアップロード（動画: X v1.1 チャンク方式 / 画像: シンプルアップロード）
+      1. メディアアップロード（動画: X v1.1 チャンク方式 / 画像: シンプルアップロード、最大4枚）
       2. メインツイート投稿（メディア付き・リンクなし）
       3. リプライ投稿（アフィリエイトリンク）
 
-    video_path と image_url は排他利用（動画作品 vs 同人誌）。
-    両方渡された場合は動画を優先する。
+    video_path と image_urls は排他利用（動画作品 vs 同人誌のサンプル画像）。
+    両方渡された場合は動画を優先する。X は1ツイート最大4枚まで画像を添付できる。
 
     Args:
         poster: テスト時に外からXPosterを渡せる（Noneなら本番設定で生成）
@@ -432,28 +434,36 @@ def post_item(
     poster = poster or XPoster()
 
     # メディアアップロード
-    media_id  = None
-    has_video = False
-    has_image = False
+    media_id   = None
+    media_ids  = []
+    has_video  = False
+    has_image  = False
 
     if video_path:
         media_id = poster.upload_video(video_path)
         has_video = media_id is not None
         if not media_id:
             log.warning("[投稿] 動画アップロード失敗。動画なしで投稿します。")
-    elif image_url:
+    elif image_urls:
         if poster._dry_run:
-            log.info("[DRY-RUN] 画像アップロードをスキップ: %s", image_url)
+            log.info("[DRY-RUN] 画像アップロードをスキップ: %d枚", len(image_urls))
         else:
-            image_bytes = download_image(image_url)
-            if image_bytes:
-                media_id = poster.upload_image(image_bytes, _image_mime_type(image_url))
-                has_image = media_id is not None
-            if not media_id:
-                log.warning("[投稿] 画像アップロード失敗。画像なしで投稿します。")
+            for url in image_urls[:4]:
+                image_bytes = download_image(url)
+                if not image_bytes:
+                    log.warning("[投稿] 画像ダウンロード失敗、スキップ: %s", url)
+                    continue
+                mid = poster.upload_image(image_bytes, _image_mime_type(url))
+                if mid:
+                    media_ids.append(mid)
+                else:
+                    log.warning("[投稿] 画像アップロード失敗、スキップ: %s", url)
+            has_image = len(media_ids) > 0
+            if not has_image:
+                log.warning("[投稿] 画像アップロードが全て失敗。画像なしで投稿します。")
 
     # メインツイート
-    tweet    = poster.post_tweet(main_body, media_id=media_id)
+    tweet    = poster.post_tweet(main_body, media_id=media_id, media_ids=media_ids or None)
     tweet_id = tweet.get("id", "")
 
     # リプライ（アフィリエイトリンク）

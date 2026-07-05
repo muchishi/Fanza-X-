@@ -476,16 +476,19 @@ def task_post(force: bool = False):
 
     # メディア選択:
     #   サンプル動画あり(FANZA動画作品) → 自前動画ライブラリから選択
-    #   サンプル動画なし & サムネイルあり(同人誌など) → サムネイル/サンプル画像を添付
+    #   サンプル動画なし(同人誌など) → サンプル画像（最大4枚）、なければサムネイルを添付
     video_path = None
-    image_url  = None
+    image_urls = []
     if product.get("sample_movie_url"):
         genre_key  = (product.get("genres") or "").split(",")[0].strip()
         video_path = pick_video(genre_key=genre_key, conn=conn)
         if not video_path:
             log.warning("[動画] 動画なし。data/videos/ に MP4 を配置してください。動画なしで投稿します。")
-    elif product.get("thumbnail_url"):
-        image_url = product["thumbnail_url"]
+    else:
+        sample_str = product.get("sample_image_urls") or ""
+        image_urls = [u for u in sample_str.split(",") if u][:4]
+        if not image_urls and product.get("thumbnail_url"):
+            image_urls = [product["thumbnail_url"]]
 
     try:
         result = post_item(
@@ -493,7 +496,7 @@ def task_post(force: bool = False):
             main_body  = item_data["body"],
             reply_body = item_data.get("reply_body", ""),
             video_path = video_path,
-            image_url  = image_url,
+            image_urls = image_urls,
             variant_id = item_data.get("variant_id", "A"),
         )
 

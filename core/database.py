@@ -45,6 +45,7 @@ def init_db() -> None:
         thumbnail_url    TEXT,
         sample_movie_url TEXT,              -- サンプル動画URL（あれば）
         has_sample_movie INTEGER DEFAULT 0, -- サンプル動画ありフラグ
+        sample_image_urls TEXT,             -- サンプル画像URL（カンマ区切り、同人誌など）
         score            REAL DEFAULT 0,
         created_at       TEXT DEFAULT (datetime('now','localtime')),
         updated_at       TEXT DEFAULT (datetime('now','localtime'))
@@ -201,6 +202,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ALTER TABLE products ADD COLUMN product_url      TEXT",
         "ALTER TABLE products ADD COLUMN sample_movie_url TEXT",
         "ALTER TABLE products ADD COLUMN has_sample_movie INTEGER DEFAULT 0",
+        "ALTER TABLE products ADD COLUMN sample_image_urls TEXT",
         "ALTER TABLE post_log ADD COLUMN video_path       TEXT",
         "ALTER TABLE post_log ADD COLUMN reply_tweet_id   TEXT",
     ]
@@ -216,15 +218,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
 # 商品操作
 # ────────────────────────────────────────────
 def upsert_product(conn: sqlite3.Connection, product: dict) -> None:
+    sample_image_urls = product.get("sample_image_urls") or []
     conn.execute("""
         INSERT INTO products
             (product_id, title, actress, genres, maker, label,
              release_date, minutes, affiliate_url, product_url,
-             thumbnail_url, sample_movie_url, has_sample_movie, score, updated_at)
+             thumbnail_url, sample_movie_url, has_sample_movie, sample_image_urls, score, updated_at)
         VALUES
             (:product_id,:title,:actress,:genres,:maker,:label,
              :release_date,:minutes,:affiliate_url,:product_url,
-             :thumbnail_url,:sample_movie_url,:has_sample_movie,:score,datetime('now','localtime'))
+             :thumbnail_url,:sample_movie_url,:has_sample_movie,:sample_image_urls,:score,datetime('now','localtime'))
         ON CONFLICT(product_id) DO UPDATE SET
             title            = excluded.title,
             actress          = excluded.actress,
@@ -235,6 +238,7 @@ def upsert_product(conn: sqlite3.Connection, product: dict) -> None:
             thumbnail_url    = excluded.thumbnail_url,
             sample_movie_url = excluded.sample_movie_url,
             has_sample_movie = excluded.has_sample_movie,
+            sample_image_urls = excluded.sample_image_urls,
             score            = excluded.score,
             updated_at       = excluded.updated_at
     """, {
@@ -243,6 +247,7 @@ def upsert_product(conn: sqlite3.Connection, product: dict) -> None:
         "product_url":      product.get("product_url", ""),
         "sample_movie_url": product.get("sample_movie_url", ""),
         "has_sample_movie": int(bool(product.get("sample_movie_url", ""))),
+        "sample_image_urls": ",".join(sample_image_urls),
     })
 
 
