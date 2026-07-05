@@ -460,18 +460,21 @@ def _select_media(product: dict, conn) -> tuple:
     return video_path, image_urls
 
 
-def task_post(force: bool = False):
+def task_post(force: bool = False, poster_fn=None):
     """
-    キューから次の投稿を取り出してX APIで実際に投稿する。
+    キューから次の投稿を取り出して実際に投稿する。
 
     戦略:
       - メインツイート: メディア付き・リンクなし（アルゴリズム最適化）
       - リプライ: アフィリエイトリンク（UTMパラメータ付き）
       - 投稿間隔チェック & 日次上限チェック
 
-    注意: X APIの投稿(POST /2/tweets)は有料プランが必要な場合がある。
-    無料枠がない環境では task_draft() による半自動投稿モードを使う。
+    Args:
+        poster_fn: 投稿を実行する関数（post_item と同じシグネチャ）。
+                   省略時は X API 経由の post_item（有料プランが必要な場合がある）。
+                   Selenium経由で投稿する場合は poster.selenium_poster.post_item_selenium を渡す。
     """
+    poster_fn = poster_fn or post_item
     conn = get_conn()
 
     if not force:
@@ -509,7 +512,7 @@ def task_post(force: bool = False):
     video_path, image_urls = _select_media(product, conn)
 
     try:
-        result = post_item(
+        result = poster_fn(
             item       = product,
             main_body  = item_data["body"],
             reply_body = item_data.get("reply_body", ""),
@@ -546,6 +549,26 @@ def task_post(force: bool = False):
         conn.commit()
         conn.close()
         return None
+
+
+# ─────────────────────────────────────────
+# 投稿モードディスパッチ
+# ─────────────────────────────────────────
+def _dispatch_post(force: bool = False):
+    """
+    config.py の POST_SCHEDULE["mode"] に応じて投稿方法を切り替える。
+      "draft"    : X APIを使わずローカルに下書き出力（デフォルト、無料）
+      "auto"     : X API経由で自動投稿（有料プランが必要な場合がある）
+      "selenium" : ブラウザ自動操作で投稿（X利用規約違反・凍結リスクあり、自己責任）
+    """
+    mode = POST_SCHEDULE.get("mode", "draft")
+    if mode == "auto":
+        return task_post(force=force)
+    elif mode == "selenium":
+        from poster.selenium_poster import post_item_selenium
+        return task_post(force=force, poster_fn=post_item_selenium)
+    else:
+        return task_draft(force=force)
 
 
 # ─────────────────────────────────────────
@@ -755,13 +778,11 @@ def run_scheduler(demo: bool = False):
     schedule.every().monday.at("06:00").do(task_actress_spotlight, demo=demo)
 
     # 投稿時間帯ごとに実行（ゆらぎ付き）
-    # mode="draft": X APIを呼ばずローカルに下書き出力（手動投稿用）
-    # mode="auto" : X APIで直接投稿（有料プラン必須）
-    post_fn = task_draft if POST_SCHEDULE.get("mode") == "draft" else task_post
+    # POST_SCHEDULE["mode"] に応じて draft / auto / selenium を自動的に切り替える
     for hour in POST_SCHEDULE["post_hours"]:
         jitter = random.randint(0, POST_SCHEDULE["time_jitter_minutes"])
         sched_time = f"{hour:02d}:{jitter:02d}"
-        schedule.every().day.at(sched_time).do(post_fn)
+        schedule.every().day.at(sched_time).do(_dispatch_post)
         log.info("  投稿スケジュール: %s (%s)", sched_time, POST_SCHEDULE.get("mode"))
 
     # 深夜3時にエンゲージメント収集（draftモードでは X API read も課金対象のため無効化）
@@ -855,10 +876,7 @@ def _try_extra_post():
                 return
 
         log.info("[緊急] セール投稿を即時実行")
-        if POST_SCHEDULE.get("mode") == "draft":
-            task_draft(force=True)
-        else:
-            task_post(force=True)
+        _dispatch_post(force=True)
 
 
 # ─────────────────────────────────────────
@@ -874,6 +892,8 @@ def main():
     parser.add_argument("--post",        action="store_true", help="キューから1件投稿して終了（X API利用・有料プラン必須）")
     parser.add_argument("--draft",       action="store_true", help="キューから1件、X APIを使わずローカルに下書き出力して終了")
     parser.add_argument("--confirm-posted", type=int, metavar="QUEUE_ID", help="手動投稿し終えたdraftをpost_logに記録")
+    parser.add_argument("--post-selenium", action="store_true", help="キューから1件、Seleniumでブラウザ自動投稿して終了（規約違反・凍結リスクは自己責任）")
+    parser.add_argument("--selenium-login", action="store_true", help="Selenium用にXへ手動ログインしてセッションを保存")
     parser.add_argument("--metrics",     action="store_true", help="エンゲージメント収集のみ実行")
     parser.add_argument("--sale",        action="store_true", help="セールアラートチェックのみ実行")
     parser.add_argument("--force",       action="store_true", help="時間帯チェックをスキップして投稿")
@@ -914,6 +934,13 @@ def main():
         result = task_draft(force=args.force)
     elif getattr(args, "confirm_posted", None) is not None:
         confirm_posted(args.confirm_posted)
+    elif getattr(args, "selenium_login", False):
+        from poster.selenium_poster import interactive_login
+        interactive_login()
+    elif getattr(args, "post_selenium", False):
+        from poster.selenium_poster import post_item_selenium
+        result = task_post(force=args.force, poster_fn=post_item_selenium)
+        print("投稿結果:", result)
     elif args.metrics:
         task_collect_metrics()
     elif args.sale:
