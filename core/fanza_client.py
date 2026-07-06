@@ -99,23 +99,36 @@ def resolve_sample_video_url(sample_movie_url: str):
 
 
 def download_sample_video(sample_movie_url: str, dest_path) -> bool:
-    """実際のサンプル動画(mp4)をダウンロードして dest_path に保存する"""
+    """
+    実際のサンプル動画(mp4)をダウンロードして dest_path に保存する。
+
+    途中で失敗しても中途半端なファイルを dest_path に残さないよう、
+    一時ファイルにダウンロードしてから完了後にリネームする
+    （中途半端なファイルが残ると、次回実行時に「キャッシュ済み」と
+    誤認識されて再ダウンロードされなくなるため）。
+    """
     video_url = resolve_sample_video_url(sample_movie_url)
     if not video_url:
         return False
+
+    dest_path = Path(dest_path)
+    tmp_path  = dest_path.with_suffix(dest_path.suffix + ".part")
+
     try:
         resp = requests.get(
             video_url, headers=_REQUEST_HEADERS,
             cookies=_AGE_CHECK_COOKIES, timeout=60, stream=True,
         )
         resp.raise_for_status()
-        with open(dest_path, "wb") as f:
+        with open(tmp_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=1024 * 256):
                 f.write(chunk)
+        tmp_path.replace(dest_path)
         log.info("[動画] サンプル動画ダウンロード完了: %s", dest_path)
         return True
     except Exception as e:
         log.warning("[動画] サンプル動画ダウンロード失敗: %s", e)
+        tmp_path.unlink(missing_ok=True)
         return False
 
 
