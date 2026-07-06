@@ -54,6 +54,72 @@ _REQUEST_HEADERS = {
 
 
 # ────────────────────────────────────────────
+# サンプル動画の実ファイルURL解決・ダウンロード
+# ────────────────────────────────────────────
+_AGE_CHECK_COOKIES = {"age_check_done": "1"}
+
+
+def resolve_sample_video_url(sample_movie_url: str):
+    """
+    sample_movie_url（litevideo/partページ）→ iframe(html5_player) → 実mp4URL
+    の順にページを辿って、実際にダウンロード可能なmp4の直リンクを取得する。
+    取得できなければ None を返す。
+    """
+    if not HAS_REQUESTS or not sample_movie_url:
+        return None
+    try:
+        resp = requests.get(
+            sample_movie_url, headers=_REQUEST_HEADERS,
+            cookies=_AGE_CHECK_COOKIES, timeout=15,
+        )
+        resp.raise_for_status()
+        m = re.search(r'<iframe[^>]+src="([^"]+html5_player[^"]+)"', resp.text)
+        if not m:
+            log.warning("[動画] html5_player iframeが見つかりません: %s", sample_movie_url)
+            return None
+        player_url = m.group(1).replace("&amp;", "&")
+
+        resp2 = requests.get(
+            player_url, headers=_REQUEST_HEADERS,
+            cookies=_AGE_CHECK_COOKIES, timeout=15,
+        )
+        resp2.raise_for_status()
+        m2 = re.search(r'"src":"([^"]+\.mp4)"', resp2.text)
+        if not m2:
+            log.warning("[動画] mp4 srcが見つかりません: %s", player_url)
+            return None
+
+        video_url = m2.group(1).replace("\/", "/")
+        if video_url.startswith("//"):
+            video_url = "https:" + video_url
+        return video_url
+    except Exception as e:
+        log.warning("[動画] サンプル動画URL解決失敗: %s", e)
+        return None
+
+
+def download_sample_video(sample_movie_url: str, dest_path) -> bool:
+    """実際のサンプル動画(mp4)をダウンロードして dest_path に保存する"""
+    video_url = resolve_sample_video_url(sample_movie_url)
+    if not video_url:
+        return False
+    try:
+        resp = requests.get(
+            video_url, headers=_REQUEST_HEADERS,
+            cookies=_AGE_CHECK_COOKIES, timeout=60, stream=True,
+        )
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 256):
+                f.write(chunk)
+        log.info("[動画] サンプル動画ダウンロード完了: %s", dest_path)
+        return True
+    except Exception as e:
+        log.warning("[動画] サンプル動画ダウンロード失敗: %s", e)
+        return False
+
+
+# ────────────────────────────────────────────
 # FANZA API v3 クライアント
 # ────────────────────────────────────────────
 class FanzaAPIClient:

@@ -8,5 +8,5 @@ __pycache__/
 data/
 logs/
 
-# Claude Codeのローカル設定
-.claude/settings.local.json
+# Claude Codeのローカル設定・状態
+.claude/

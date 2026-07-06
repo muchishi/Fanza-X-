@@ -100,7 +100,7 @@ def send_video(video_path, caption: str = "") -> bool:
                 url,
                 data={"chat_id": TELEGRAM["chat_id"], "caption": caption},
                 files={"video": f},
-                timeout=60,
+                timeout=300,
             )
         if resp.status_code != 200:
             log.warning("[Telegram] sendVideo失敗: %d %s", resp.status_code, resp.text[:200])

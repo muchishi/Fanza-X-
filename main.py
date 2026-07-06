@@ -452,7 +452,8 @@ def _is_post_hour_allowed(hour: int) -> bool:
 def _select_media(product: dict, conn) -> tuple:
     """
     商品に応じてメディアを選択する。
-      サンプル動画あり(FANZA動画作品) → 自前動画ライブラリから選択
+      サンプル動画あり(FANZA動画作品) → 商品ページを辿って実際のサンプル動画をダウンロード
+                                        （失敗時は自前動画ライブラリにフォールバック）
       サンプル動画なし(同人誌など)    → サンプル画像（1枚目除外・最大4枚ランダム）、
                                         なければサムネイルを添付
     Returns: (video_path, image_urls)
@@ -460,10 +461,20 @@ def _select_media(product: dict, conn) -> tuple:
     video_path = None
     image_urls = []
     if product.get("sample_movie_url"):
-        genre_key  = (product.get("genres") or "").split(",")[0].strip()
-        video_path = pick_video(genre_key=genre_key, conn=conn)
-        if not video_path:
-            log.warning("[動画] 動画なし。data/videos/ に MP4 を配置してください。動画なしで投稿します。")
+        from core.fanza_client import download_sample_video
+
+        cache_dir = DATA_DIR / "videos" / "_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / f"{product.get('product_id', 'video')}.mp4"
+
+        if cache_path.exists() or download_sample_video(product["sample_movie_url"], cache_path):
+            video_path = cache_path
+        else:
+            log.warning("[動画] 実サンプル動画の取得に失敗。自前動画ライブラリにフォールバックします。")
+            genre_key  = (product.get("genres") or "").split(",")[0].strip()
+            video_path = pick_video(genre_key=genre_key, conn=conn)
+            if not video_path:
+                log.warning("[動画] 動画なし。data/videos/ に MP4 を配置してください。動画なしで投稿します。")
     else:
         sample_str = product.get("sample_image_urls") or ""
         samples = [u for u in sample_str.split(",") if u]
