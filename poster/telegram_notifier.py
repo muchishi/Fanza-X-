@@ -90,7 +90,7 @@ def send_message_with_confirm_button(text: str, queue_id: int) -> bool:
         return False
 
 
-def send_video(video_path, caption: str) -> bool:
+def send_video(video_path, caption: str = "") -> bool:
     if not _enabled():
         return False
     url = API_BASE.format(token=TELEGRAM["bot_token"]) + "/sendVideo"
@@ -220,7 +220,7 @@ def notify_draft(
     image_paths: Optional[list] = None,
 ) -> bool:
     """
-    動画系の下書き1件をTelegramに通知する（従来通りの2投稿構成）。
+    動画系(FANZA動画作品)の下書き1件をTelegramに通知する（従来通りの2投稿構成）。
     メディア付きメッセージ(本文=キャプション) → リプライ文 → 「投稿完了」ボタン、の順で送信。
     """
     if not _enabled():
@@ -235,7 +235,7 @@ def notify_draft(
         ok = send_message(main_body)
 
     if reply_body:
-        send_message("【リプライ用】" + chr(10) + reply_body)
+        send_message(reply_body)
 
     send_message_with_confirm_button(
         "投稿し終えたらボタンを押してください👇" + chr(10) + "(または python main.py --confirm-posted {})".format(queue_id),
