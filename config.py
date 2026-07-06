@@ -41,12 +41,15 @@ FANZA = {
     "affiliate_id": os.getenv("FANZA_AFFILIATE_ID", ""),
 
     # 投稿対象ジャンル（priorityが低いほど優先）
+    # genre_id は FANZA APIの GenreSearch(floor_id=43)で調べた実際の数値ジャンルID。
+    # ItemListの絞り込みには article=genre & article_id=<genre_id> を使う
+    # （genre=<文字列key> は無視されるため、keyはハッシュタグ/動画フォルダ名の内部識別子として使う）
     "target_genres": [
-        {"key": "hitoduma",  "label": "人妻・熟女",   "priority": 1},
-        {"key": "ntr",       "label": "NTR・寝取られ", "priority": 2},
-        {"key": "amateur",   "label": "素人・ハメ撮り", "priority": 3},
-        {"key": "bigtits",   "label": "巨乳",          "priority": 4},
-        {"key": "creampie",  "label": "中出し",         "priority": 5},
+        {"key": "hitoduma",  "label": "人妻・熟女",   "priority": 1, "genre_id": 1039},
+        {"key": "ntr",       "label": "NTR・寝取られ", "priority": 2, "genre_id": 4111},
+        {"key": "amateur",   "label": "素人・ハメ撮り", "priority": 3, "genre_id": 4024},
+        {"key": "bigtits",   "label": "巨乳",          "priority": 4, "genre_id": 2001},
+        {"key": "creampie",  "label": "中出し",         "priority": 5, "genre_id": 5001},
     ],
 
     # セール判定：定価からN%以上値下がりでセール扱い

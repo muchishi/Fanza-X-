@@ -144,20 +144,24 @@ class FanzaAPIClient:
             log.error("FANZA API 呼び出し失敗 [%s]: %s", endpoint, e)
             return {}
 
-    def get_items(self, genre_key: str, sort: str = "rank", hits: int = 20) -> list[dict]:
-        data = self._get("ItemList", {
+    def get_items(self, genre_key: str, sort: str = "rank", hits: int = 20, genre_id=None) -> list[dict]:
+        params = {
             "site":    "FANZA",
             "service": "digital",
             "floor":   "videoa",
             "hits":    hits,
             "sort":    sort,
-            "genre":   genre_key,
-        })
+        }
+        # FANZA APIの genre=<文字列> は無視されるため、実際の数値ジャンルIDで絞り込む
+        if genre_id:
+            params["article"]    = "genre"
+            params["article_id"] = genre_id
+        data = self._get("ItemList", params)
         items = data.get("result", {}).get("items", [])
         return [self._normalize(item) for item in items]
 
-    def get_new_releases(self, genre_key: str, hits: int = 10) -> list[dict]:
-        return self.get_items(genre_key, sort="date", hits=hits)
+    def get_new_releases(self, genre_key: str, hits: int = 10, genre_id=None) -> list[dict]:
+        return self.get_items(genre_key, sort="date", hits=hits, genre_id=genre_id)
 
     def search_actress_id(self, actress_name: str) -> Optional[str]:
         """
@@ -613,17 +617,19 @@ class FanzaClient:
         actress_stats: dict = None,
         conn=None,
         require_sample_movie: bool = True,
+        genre_id=None,
     ) -> list[dict]:
         """
         スコアリング済み商品リストを返す（高スコア順）。
 
         Args:
             require_sample_movie: Trueの場合、サンプル動画ありの商品のみ返す
+            genre_id: FANZA APIの実際の数値ジャンルID（config.pyのtarget_genresを参照）
         """
         if self.demo:
             items = make_demo_items(genre_key)
         elif self._mode == "api":
-            items = self._client.get_items(genre_key, hits=20)
+            items = self._client.get_items(genre_key, hits=20, genre_id=genre_id)
         else:
             items = self._client.get_items(genre_key, limit=20)
 
@@ -651,9 +657,9 @@ class FanzaClient:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
-    def get_sale_products(self, genre_key: str) -> list[dict]:
+    def get_sale_products(self, genre_key: str, genre_id=None) -> list[dict]:
         """セール中 かつ サンプル動画あり の商品のみ返す"""
-        items = self.get_scored_products(genre_key, require_sample_movie=True)
+        items = self.get_scored_products(genre_key, require_sample_movie=True, genre_id=genre_id)
         return [i for i in items if i.get("is_sale")]
 
     def get_actress_spotlight(self, actress_name: str) -> list[dict]:

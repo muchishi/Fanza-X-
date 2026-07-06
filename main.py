@@ -99,11 +99,12 @@ def task_fetch_and_queue(demo: bool = False):
         genre_key   = genre_cfg["key"]
         genre_label = genre_cfg["label"]
         priority_no = genre_cfg["priority"]
+        genre_id    = genre_cfg.get("genre_id")
 
         log.info("[取得] %s (%s)", genre_label, genre_key)
 
         products = client.get_scored_products(
-            genre_key, priority_no, actress_stats, conn
+            genre_key, priority_no, actress_stats, conn, genre_id=genre_id
         )
 
         for rank, product in enumerate(products[:5], start=1):
@@ -342,7 +343,7 @@ def task_sale_alert(demo: bool = False):
     sale_queued = 0
 
     for genre_cfg in FANZA["target_genres"]:
-        sale_products = client.get_sale_products(genre_cfg["key"])
+        sale_products = client.get_sale_products(genre_cfg["key"], genre_id=genre_cfg.get("genre_id"))
 
         for product in sale_products[:2]:
             pid = product["product_id"]
